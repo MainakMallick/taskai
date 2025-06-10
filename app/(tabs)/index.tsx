@@ -1,71 +1,106 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, SafeAreaView } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, SafeAreaView, ActivityIndicator, Alert } from 'react-native';
 import { CircleCheck as CheckCircle2, Circle, Calendar, Target } from 'lucide-react-native';
 
 const { width } = Dimensions.get('window');
 
-interface Goal {
-  id: string;
-  title: string;
-  description: string;
-  completed: boolean;
-  difficulty: number;
+interface Task {
+  goalId: string;
+  category: string;
+  task: {
+    day: number;
+    goal: string;
+    explanation: string;
+    difficulty: 'easy' | 'medium' | 'hard';
+    completed: boolean;
+  };
 }
 
+const TODAY_TASKS_URL = 'http://128.61.142.123:3001/api/today-tasks/user123';
+const COMPLETE_TASK_URL = (goalId: string, day: number) => `http://128.61.142.123:3001/api/complete-task/${goalId}/${day}`;
+
 export default function Home() {
-  const [todayGoals, setTodayGoals] = useState<Goal[]>([
-    {
-      id: '1',
-      title: '5-minute walk',
-      description: 'Take a short walk around your neighborhood',
-      completed: false,
-      difficulty: 1,
-    },
-    {
-      id: '2',
-      title: 'Drink 2 glasses of water',
-      description: 'Stay hydrated throughout the morning',
-      completed: true,
-      difficulty: 1,
-    },
-    {
-      id: '3',
-      title: 'Do 3 push-ups',
-      description: 'Start building upper body strength',
-      completed: false,
-      difficulty: 2,
-    },
-  ]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const completedCount = todayGoals.filter(goal => goal.completed).length;
-  const totalCount = todayGoals.length;
-  const completionPercentage = Math.round((completedCount / totalCount) * 100);
-
-  const toggleGoal = (goalId: string) => {
-    setTodayGoals(prev => 
-      prev.map(goal => 
-        goal.id === goalId ? { ...goal, completed: !goal.completed } : goal
-      )
-    );
+  const fetchTodayTasks = async () => {
+    try {
+      console.log('Attempting to fetch tasks from:', TODAY_TASKS_URL);
+      const response = await fetch(TODAY_TASKS_URL);
+      console.log('Response status:', response.status);
+      const data = await response.json();
+      console.log('Response data:', data);
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to fetch tasks');
+      }
+      if (!data.tasks || !Array.isArray(data.tasks)) {
+        throw new Error('Invalid response format');
+      }
+      setTasks(data.tasks);
+    } catch (error: any) {
+      console.error('Error fetching tasks:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      Alert.alert('Error', `Failed to fetch today's tasks: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const getDifficultyColor = (difficulty: number) => {
+  const handleToggleTask = async (goalId: string, day: number, currentCompleted: boolean) => {
+    try {
+      const response = await fetch(COMPLETE_TASK_URL(goalId, day), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed: !currentCompleted }),
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to update task');
+      }
+      fetchTodayTasks();
+    } catch (error: any) {
+      Alert.alert('Error', error?.message || 'Failed to update task');
+    }
+  };
+
+  useEffect(() => {
+    fetchTodayTasks();
+  }, []);
+
+  const completedCount = tasks.filter(t => t.task.completed).length;
+  const totalCount = tasks.length;
+  const completionPercentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+
+  const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
-      case 1: return '#4A9B8E';
-      case 2: return '#E07B39';
-      case 3: return '#D4622A';
+      case 'easy': return '#4A9B8E';
+      case 'medium': return '#E07B39';
+      case 'hard': return '#D4622A';
       default: return '#8B7355';
     }
   };
 
-  const getDifficultyLabel = (difficulty: number) => {
+  const getDifficultyLabel = (difficulty: string) => {
     switch (difficulty) {
-      case 1: return 'Easy';
-      case 2: return 'Medium';
-      case 3: return 'Hard';
+      case 'easy': return 'Easy';
+      case 'medium': return 'Medium';
+      case 'hard': return 'Hard';
       default: return 'Unknown';
     }
   };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4A9B8E" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -115,52 +150,54 @@ export default function Home() {
           </View>
 
           <View style={styles.goalsList}>
-            {todayGoals.map((goal) => (
-              <TouchableOpacity
-                key={goal.id}
-                style={[
-                  styles.goalCard,
-                  goal.completed && styles.goalCardCompleted
-                ]}
-                onPress={() => toggleGoal(goal.id)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.goalIcon}>
-                  {goal.completed ? (
-                    <CheckCircle2 color="#4A9B8E\" size={24} strokeWidth={1.5} />
-                  ) : (
-                    <Circle color="#C4B5A0" size={24} strokeWidth={1.5} />
-                  )}
-                </View>
-                
-                <View style={styles.goalContent}>
-                  <Text style={[
-                    styles.goalTitle,
-                    goal.completed && styles.goalTitleCompleted
+            {tasks.length === 0 ? (
+              <Text style={styles.emptyStateText}>No tasks for today</Text>
+            ) : (
+              tasks.map((task, idx) => (
+                <TouchableOpacity
+                  key={task.goalId + '-' + task.task.day}
+                  style={[
+                    styles.goalCard,
+                    task.task.completed && styles.goalCardCompleted
+                  ]}
+                  onPress={() => handleToggleTask(task.goalId, task.task.day, task.task.completed)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.goalIcon}>
+                    {task.task.completed ? (
+                      <CheckCircle2 color="#4A9B8E" size={24} strokeWidth={1.5} />
+                    ) : (
+                      <Circle color="#C4B5A0" size={24} strokeWidth={1.5} />
+                    )}
+                  </View>
+                  <View style={styles.goalContent}>
+                    <Text style={[
+                      styles.goalTitle,
+                      task.task.completed && styles.goalTitleCompleted
+                    ]}>
+                      {task.task.goal}
+                    </Text>
+                    <Text style={[
+                      styles.goalDescription,
+                      task.task.completed && styles.goalDescriptionCompleted
+                    ]}>
+                      {task.task.explanation}
+                    </Text>
+                  </View>
+                  <View style={[
+                    styles.difficultyBadge,
+                    { backgroundColor: getDifficultyColor(task.task.difficulty) + '20' }
                   ]}>
-                    {goal.title}
-                  </Text>
-                  <Text style={[
-                    styles.goalDescription,
-                    goal.completed && styles.goalDescriptionCompleted
-                  ]}>
-                    {goal.description}
-                  </Text>
-                </View>
-
-                <View style={[
-                  styles.difficultyBadge,
-                  { backgroundColor: getDifficultyColor(goal.difficulty) + '20' }
-                ]}>
-                  <Text style={[
-                    styles.difficultyText,
-                    { color: getDifficultyColor(goal.difficulty) }
-                  ]}>
-                    {getDifficultyLabel(goal.difficulty)}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            ))}
+                    <Text style={[
+                      styles.difficultyText,
+                      { color: getDifficultyColor(task.task.difficulty) }
+                    ]}>
+                      {getDifficultyLabel(task.task.difficulty)}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))
+            )}
           </View>
         </View>
 
@@ -363,5 +400,17 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: 100,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyStateText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#8B7355',
+    textAlign: 'center',
+    marginTop: 20,
   },
 });
